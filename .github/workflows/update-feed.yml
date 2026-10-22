@@ -1,11 +1,13 @@
 
 name: Update PWHL Las Vegas RSS
 
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 */2 * * *'
+    - cron: '17,47 * * * *'
 
+  
 permissions:
   contents: read
   pages: write
