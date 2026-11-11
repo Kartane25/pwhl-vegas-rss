@@ -1,15 +1,13 @@
 
-name: Update PWHL Las Vegas RSS
-
+name: Update Vegas Vanguards RSS
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '17,47 * * * *'
 
-  
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -22,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
 
       - uses: actions/setup-python@v5
         with:
@@ -30,8 +31,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Generate official PWHL feed
+      - name: Generate official Vegas Vanguards feed
         run: python build_feed.py
+
+      - name: Save permanent article timestamps
+        run: |
+          if [ -f article_timestamps.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add article_timestamps.json
+
+            if ! git diff --cached --quiet; then
+              git commit -m "Update Vegas Vanguards article timestamps"
+              git push origin HEAD:main
+            else
+              echo "No new article timestamps to save."
+            fi
+          else
+            echo "Timestamp file not created yet."
+          fi
 
       - uses: actions/configure-pages@v5
 
