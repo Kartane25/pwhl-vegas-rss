@@ -25,7 +25,8 @@ PREFIXES = (
 )
 OUT = "site/feed.xml"
 LIMIT = 20
-
+STATE_FILE = "article_timestamps.json"
+LIVE_FEED = "https://kartane25.github.io/pwhl-vegas-rss/feed.xml"
 NS_CONTENT = "http://purl.org/rss/1.0/modules/content/"
 NS_MEDIA = "http://search.yahoo.com/mrss/"
 
@@ -252,6 +253,83 @@ def parse_article(url):
     }
 
 
+def load_timestamps():
+    """Load permanent first-discovered article timestamps."""
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    # First-run migration: preserve dates already published
+    # in the existing RSS feed.
+    print("Initializing timestamps from existing live RSS.")
+
+    response = SESSION.get(LIVE_FEED, timeout=25)
+    response.raise_for_status()
+    root = ET.fromstring(response.content)
+
+    saved = {}
+
+    for item in root.findall("./channel/item"):
+        guid = item.findtext("guid")
+        link = item.findtext("link")
+        date = item.findtext("pubDate")
+
+        url = link or guid
+
+        if not url or not date:
+            continue
+
+        stamp = email.utils.parsedate_to_datetime(date)
+        saved[url] = stamp.astimezone(
+            dt.timezone.utc
+        ).isoformat()
+
+    # Protect existing posts against accidental restamping.
+    if len(saved) < 18:
+        raise RuntimeError(
+            "Existing RSS baseline is incomplete. "
+            "Refusing to restamp historical articles."
+        )
+
+    print("Preserved", len(saved), "existing timestamps.")
+    return saved
+
+
+def assign_discovery_timestamps(articles, saved):
+    """Stamp newly discovered articles once, permanently."""
+    now = dt.datetime.now(dt.timezone.utc)
+    used = set(saved.values())
+    new_count = 0
+
+    for article in articles:
+        url = article["url"]
+
+        if url not in saved:
+            stamp = now + dt.timedelta(seconds=new_count)
+
+            while stamp.isoformat() in used:
+                stamp += dt.timedelta(seconds=1)
+
+            saved[url] = stamp.isoformat()
+            used.add(saved[url])
+            new_count += 1
+
+            print("NEW:", article["title"][:90])
+
+        article["date"] = dt.datetime.fromisoformat(
+            saved[url]
+        )
+
+    print("New articles discovered:", new_count)
+    return saved
+
+
+def save_timestamps(saved):
+    """Write timestamp history for GitHub Actions to commit."""
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(saved, f, indent=2, sort_keys=True)
+        f.write("\n")
+
 def build():
     print("Checking official Vegas Vanguards news...")
     soup = fetch(NEWS)
@@ -293,29 +371,20 @@ def build():
             "No articles parsed and no previous feed exists."
         )
 
-        articles.sort(
-        key=lambda article: article["date"],
-        reverse=True,
-    )
+    # Load permanent timestamps for existing articles.
+    saved = load_timestamps()
 
-    # Give articles sharing a timestamp unique seconds.
-    # Keep the ordering stable across workflow runs.
-    used_timestamps = set()
+    # Assign first-detected timestamps to new articles.
+    saved = assign_discovery_timestamps(articles, saved)
 
-    for article in articles:
-        stamp = article["date"].astimezone(dt.timezone.utc)
-
-        while stamp in used_timestamps:
-            stamp += dt.timedelta(seconds=1)
-
-        used_timestamps.add(stamp)
-        article["date"] = stamp
-
-    # Keep newest articles first after adjusting timestamps.
+    # Publish newest timestamps first.
     articles.sort(
         key=lambda article: article["date"],
         reverse=True,
     )
+
+
+   
 
     rss = ET.Element("rss", {"version": "2.0"})
     channel = ET.SubElement(rss, "channel")
@@ -409,7 +478,7 @@ def build():
         encoding="utf-8",
         xml_declaration=True,
     )
-
+    save_timestamps(saved)
     print(
         "Wrote",
         OUT,
