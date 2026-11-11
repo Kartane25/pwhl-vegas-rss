@@ -293,6 +293,25 @@ def build():
             "No articles parsed and no previous feed exists."
         )
 
+        articles.sort(
+        key=lambda article: article["date"],
+        reverse=True,
+    )
+
+    # Give articles sharing a timestamp unique seconds.
+    # Keep the ordering stable across workflow runs.
+    used_timestamps = set()
+
+    for article in articles:
+        stamp = article["date"].astimezone(dt.timezone.utc)
+
+        while stamp in used_timestamps:
+            stamp += dt.timedelta(seconds=1)
+
+        used_timestamps.add(stamp)
+        article["date"] = stamp
+
+    # Keep newest articles first after adjusting timestamps.
     articles.sort(
         key=lambda article: article["date"],
         reverse=True,
