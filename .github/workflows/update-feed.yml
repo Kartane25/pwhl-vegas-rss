@@ -3,8 +3,7 @@ name: Update Vegas Vanguards RSS
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '17,47 * * * *'
+  
 
 permissions:
   contents: write
